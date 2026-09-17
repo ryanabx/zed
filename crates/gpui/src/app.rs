@@ -1734,6 +1734,12 @@ impl App {
         self.restart_path = Some(path);
     }
 
+    /// Sets the arguments to pass when restarting the application, replacing the ones configured
+    /// with [`Application::with_restart_arguments`].
+    pub fn set_restart_arguments(&mut self, arguments: Vec<OsString>) {
+        self.restart_arguments = arguments;
+    }
+
     /// Returns the HTTP client for the application.
     pub fn http_client(&self) -> Arc<dyn HttpClient> {
         self.http_client.clone()
