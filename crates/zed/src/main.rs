@@ -675,6 +675,9 @@ fn main() {
             cx.background_executor().clone(),
         );
         command_palette::init(cx);
+        // Registers a command palette filter, so this must follow `command_palette::init`.
+        #[cfg(target_os = "linux")]
+        zed::flatpak::init(cx);
         let copilot_chat_configuration = copilot_chat::CopilotChatConfiguration {
             enterprise_uri: language::language_settings::all_language_settings(None, cx)
                 .edit_predictions

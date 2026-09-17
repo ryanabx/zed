@@ -56,18 +56,6 @@ There are several third-party Zed packages for various Linux distributions and p
 
 See [Repology](https://repology.org/project/zed-editor/versions) for a current list of Zed packages in various repositories.
 
-### Flatpak
-
-Zed is available on [Flathub](https://flathub.org/apps/dev.zed.Zed) as `dev.zed.Zed`, and runs inside the Flatpak sandbox by default. This means Zed only sees the tools and files that the sandbox exposes, so language servers, formatters and other programs installed on your host may not be available.
-
-To start Zed on the host instead, which gives it access to your normal development environment, set the `ZED_FLATPAK_ESCAPE` environment variable for the app:
-
-```sh
-flatpak override --user --env=ZED_FLATPAK_ESCAPE=1 dev.zed.Zed
-```
-
-Undo this with `flatpak override --user --unset-env=ZED_FLATPAK_ESCAPE dev.zed.Zed`.
-
 ### Community
 
 When installing a third-party package please be aware that it may not be completely up to date and may be slightly different from the Zed we package (a common change is to rename the binary to `zedit` or `zeditor` to avoid conflicting with other packages).
@@ -75,6 +63,26 @@ When installing a third-party package please be aware that it may not be complet
 We'd love your help making Zed available for everyone. If Zed is not yet available for your package manager, and you would like to fix that, we have some notes on [how to do it](./development/linux.md#notes-for-packaging-zed).
 
 The packages in this section provide binary installs for Zed but are not official packages within the associated distributions. These packages are maintained by community members and as such a higher level of caution should be taken when installing them.
+
+### Flatpak
+
+Zed is available on [Flathub](https://flathub.org/apps/dev.zed.Zed) as `dev.zed.Zed`. Like the other packages above it is maintained by community members rather than by Zed, so it may lag behind releases. It runs inside the Flatpak sandbox by default. This means Zed only sees the tools and files that the sandbox exposes, so language servers, formatters and other programs installed on your host may not be available.
+
+The first time you start Zed inside the sandbox it offers to restart on the host, which gives it access to your normal development environment. The same choices are available later from the command palette:
+
+- `flatpak: restart on host` leaves the sandbox for this launch only.
+- `flatpak: always run on host` starts outside the sandbox from now on.
+- `flatpak: always run in sandbox` reverts that, and puts Zed back in the sandbox.
+
+To see where the running instance is, open {#action zed::About}; it reports either `Flatpak sandbox` or `Flatpak, running on host`.
+
+The "always" choices are stored as a Flatpak environment override, so you can also set one without Zed:
+
+```sh
+flatpak override --user --env=ZED_FLATPAK_ESCAPE=1 dev.zed.Zed
+```
+
+Undo this with `flatpak override --user --unset-env=ZED_FLATPAK_ESCAPE dev.zed.Zed`.
 
 ### Downloading manually
 

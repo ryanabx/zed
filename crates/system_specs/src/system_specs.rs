@@ -4,7 +4,7 @@ use human_bytes::human_bytes;
 use release_channel::{AppCommitSha, AppVersion, ReleaseChannel};
 use semver::Version;
 use serde::Serialize;
-use std::{env, fmt::Display};
+use std::{env, fmt::Display, path::Path, sync::LazyLock};
 use sysinfo::{MemoryRefreshKind, RefreshKind, System};
 
 actions!(
@@ -14,6 +14,60 @@ actions!(
         CopySystemSpecsIntoClipboard,
     ]
 );
+
+/// Whether Zed is running inside a Flatpak sandbox.
+///
+/// A Flatpak install can be running either inside the sandbox or on the host, because Zed's
+/// launcher can restart it outside. `ZED_BUNDLE_TYPE` is baked in at compile time and reads
+/// `flatpak` either way, so it cannot tell the two apart.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum FlatpakState {
+    /// Running inside the Flatpak sandbox.
+    Sandboxed { app_id: String },
+    /// A Flatpak install that was restarted on the host, outside the sandbox.
+    EscapedToHost { app_id: String },
+    /// Not installed as a Flatpak.
+    NotFlatpak,
+}
+
+impl FlatpakState {
+    /// The Flatpak application ID, when Zed was installed as one.
+    pub fn app_id(&self) -> Option<&str> {
+        match self {
+            Self::Sandboxed { app_id } | Self::EscapedToHost { app_id } => Some(app_id),
+            Self::NotFlatpak => None,
+        }
+    }
+
+    pub fn is_sandboxed(&self) -> bool {
+        matches!(self, Self::Sandboxed { .. })
+    }
+}
+
+/// Present only inside a Flatpak sandbox.
+const FLATPAK_INFO_PATH: &str = "/.flatpak-info";
+/// Set by the Flatpak launcher on a process it restarted outside the sandbox. See the `flatpak`
+/// module in `crates/cli/src/main.rs`.
+const ESCAPED_ENV_NAME: &str = "ZED_FLATPAK_ESCAPED";
+
+/// Neither the sandbox nor the escape can change while Zed is running, so this is computed once.
+pub fn flatpak_state() -> &'static FlatpakState {
+    static FLATPAK_STATE: LazyLock<FlatpakState> = LazyLock::new(|| {
+        if Path::new(FLATPAK_INFO_PATH).exists()
+            && let Ok(app_id) = env::var("FLATPAK_ID")
+        {
+            return FlatpakState::Sandboxed { app_id };
+        }
+
+        match env::var(ESCAPED_ENV_NAME) {
+            Ok(app_id) if !app_id.is_empty() => FlatpakState::EscapedToHost { app_id },
+            _ => FlatpakState::NotFlatpak,
+        }
+    });
+
+    &FLATPAK_STATE
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct SystemSpecs {
@@ -25,6 +79,7 @@ pub struct SystemSpecs {
     architecture: &'static str,
     commit_sha: Option<String>,
     bundle_type: Option<String>,
+    flatpak_state: &'static FlatpakState,
     gpu_specs: Option<String>,
 }
 
@@ -62,6 +117,7 @@ impl SystemSpecs {
                 app_version,
                 release_channel: release_channel.display_name(),
                 bundle_type,
+                flatpak_state: flatpak_state(),
                 os_name,
                 os_version,
                 memory,
@@ -99,6 +155,7 @@ impl SystemSpecs {
             architecture,
             commit_sha,
             bundle_type,
+            flatpak_state: flatpak_state(),
             gpu_specs: try_determine_available_gpus(),
         }
     }
@@ -114,10 +171,18 @@ impl Display for SystemSpecs {
                 Some(commit_sha) => format!("{} {}", self.release_channel, commit_sha),
                 None => self.release_channel.to_string(),
             },
-            if let Some(bundle_type) = &self.bundle_type {
-                format!("({bundle_type})")
-            } else {
-                "".to_string()
+            // A Flatpak install has a meaningful sandbox state even when it was built without
+            // `ZED_BUNDLE_TYPE`, so the sandbox is reported on its own terms rather than as a
+            // detail hanging off the bundle type.
+            match (self.bundle_type.as_deref(), self.flatpak_state) {
+                (bundle_type, FlatpakState::Sandboxed { .. }) => {
+                    format!("({}, sandboxed)", bundle_type.unwrap_or("flatpak"))
+                }
+                (bundle_type, FlatpakState::EscapedToHost { .. }) => {
+                    format!("({}, on host)", bundle_type.unwrap_or("flatpak"))
+                }
+                (Some(bundle_type), FlatpakState::NotFlatpak) => format!("({bundle_type})"),
+                (None, FlatpakState::NotFlatpak) => "".to_string(),
             },
             if cfg!(debug_assertions) {
                 "(Taylor's Version)"

@@ -1,5 +1,7 @@
 mod app_menus;
 pub mod edit_prediction_registry;
+#[cfg(target_os = "linux")]
+pub(crate) mod flatpak;
 #[cfg(target_os = "macos")]
 pub(crate) mod mac_only_instance;
 mod migrate;
@@ -1546,10 +1548,15 @@ fn open_about_window(cx: &mut App) {
         message: SharedString,
         commit: Option<SharedString>,
         full_version: SharedString,
+        sandbox: Option<SharedString>,
     }
 
     impl AboutWindow {
-        fn new(cx: &mut Context<Self>) -> Self {
+        fn new(
+            commit: Option<SharedString>,
+            sandbox: Option<SharedString>,
+            cx: &mut Context<Self>,
+        ) -> Self {
             let release_channel = ReleaseChannel::global(cx);
             let release_channel_name = release_channel.display_name();
             let full_version: SharedString = AppVersion::global(cx).to_string().into();
@@ -1561,10 +1568,6 @@ fn open_about_window(cx: &mut App) {
                 ""
             };
             let message: SharedString = format!("{release_channel_name} {version} {debug}").into();
-            let commit = AppCommitSha::try_global(cx)
-                .map(|sha| sha.full())
-                .filter(|commit| !commit.is_empty())
-                .map(SharedString::from);
 
             Self {
                 focus_handle: cx.focus_handle(),
@@ -1574,11 +1577,12 @@ fn open_about_window(cx: &mut App) {
                 message,
                 commit,
                 full_version,
+                sandbox,
             }
         }
 
         fn copy_details(&self, window: &mut Window, cx: &mut Context<Self>) {
-            let content = match self.commit.as_ref() {
+            let mut content = match self.commit.as_ref() {
                 Some(commit) => {
                     format!(
                         "{}\nCommit: {}\nVersion: {}",
@@ -1587,6 +1591,9 @@ fn open_about_window(cx: &mut App) {
                 }
                 None => format!("{}\nVersion: {}", self.message, self.full_version),
             };
+            if let Some(sandbox) = self.sandbox.as_ref() {
+                content.push_str(&format!("\nSandbox: {sandbox}"));
+            }
             cx.write_to_clipboard(ClipboardItem::new_string(content));
             window.remove_window();
         }
@@ -1633,7 +1640,15 @@ fn open_about_window(cx: &mut App) {
                                     .color(Color::Muted)
                                     .size(LabelSize::XSmall),
                             )
-                            .child(Label::new(self.full_version.clone()).size(LabelSize::Small)),
+                            .child(Label::new(self.full_version.clone()).size(LabelSize::Small))
+                            .when_some(self.sandbox.clone(), |this, sandbox| {
+                                this.child(
+                                    Label::new("Sandbox")
+                                        .color(Color::Muted)
+                                        .size(LabelSize::XSmall),
+                                )
+                                .child(Label::new(sandbox).size(LabelSize::Small))
+                            }),
                     )
                     .child(
                         h_flex()
@@ -1706,9 +1721,23 @@ fn open_about_window(cx: &mut App) {
         return;
     }
 
+    let commit = AppCommitSha::try_global(cx)
+        .map(|sha| sha.full())
+        .filter(|commit| !commit.is_empty())
+        .map(SharedString::from);
+
+    #[cfg(target_os = "linux")]
+    let sandbox = crate::zed::flatpak::about_window_status();
+    #[cfg(not(target_os = "linux"))]
+    let sandbox: Option<SharedString> = None;
+
+    // The window cannot be resized, so it has to be tall enough for whichever optional detail
+    // rows will actually render. Each is a muted caption above its value, roughly 52px. The base
+    // height already fits one such row, which until now was only ever the commit.
+    let detail_rows = u8::from(commit.is_some()) + u8::from(sandbox.is_some());
     let window_size = Size {
         width: px(440.),
-        height: px(300.),
+        height: px(300.) + px(56.) * f32::from(detail_rows.saturating_sub(1)),
     };
 
     cx.open_window(
@@ -1726,7 +1755,7 @@ fn open_about_window(cx: &mut App) {
             ..Default::default()
         },
         |window, cx| {
-            let about_window = cx.new(AboutWindow::new);
+            let about_window = cx.new(|cx| AboutWindow::new(commit, sandbox, cx));
             let focus_handle = about_window.read(cx).ok_entry.focus_handle.clone();
             window.activate_window();
             focus_handle.focus(window, cx);

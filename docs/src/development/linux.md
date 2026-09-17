@@ -86,7 +86,7 @@ Zed moves quickly, and distribution maintainers often have different constraints
 
 ## Flatpak
 
-> Zed runs inside the sandbox by default. Set `ZED_FLATPAK_ESCAPE=1` to restart on the host instead. Workflows that rely on Flatpak's sandboxing may not work as expected once Zed escapes it.
+> Zed runs inside the sandbox by default. The notification shown on first launch, the `flatpak:` actions in the command palette, and `ZED_FLATPAK_ESCAPE=1` all restart it on the host instead. Workflows that rely on Flatpak's sandboxing may not work as expected once Zed escapes it.
 
 To build & install the Flatpak package locally follow the steps below:
 
