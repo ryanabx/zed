@@ -485,7 +485,7 @@ fn run() -> Result<()> {
     #[cfg(unix)]
     util::prevent_root_execution();
 
-    // Exit flatpak sandbox if needed
+    // Exit the flatpak sandbox if the user asked us to
     #[cfg(target_os = "linux")]
     {
         flatpak::try_restart_to_host();
@@ -525,7 +525,7 @@ fn run() -> Result<()> {
     }
 
     #[cfg(target_os = "linux")]
-    let args = flatpak::set_bin_if_no_escape(args);
+    let args = flatpak::set_bin_if_sandboxed(args);
 
     let app = Detect::detect(args.zed.as_deref()).context("Bundle detection")?;
 
@@ -1034,7 +1034,10 @@ mod flatpak {
     use std::{env, process};
 
     const EXTRA_LIB_ENV_NAME: &str = "ZED_FLATPAK_LIB_PATH";
-    const NO_ESCAPE_ENV_NAME: &str = "ZED_FLATPAK_NO_ESCAPE";
+    const ESCAPE_ENV_NAME: &str = "ZED_FLATPAK_ESCAPE";
+    /// Set on the escaped process so that it can tell it came from a Flatpak install, and which
+    /// one. `FLATPAK_ID` is only set inside the sandbox, so it cannot answer either question.
+    const ESCAPED_ENV_NAME: &str = "ZED_FLATPAK_ESCAPED";
 
     fn restart_cli_args(flatpak_dir: &Path, invocation_args: &[OsString]) -> Vec<OsString> {
         let mut args = Vec::with_capacity(invocation_args.len() + 2);
@@ -1064,7 +1067,7 @@ mod flatpak {
         unsafe { env::set_var("LD_LIBRARY_PATH", env::join_paths(paths).unwrap()) };
     }
 
-    /// Restarts outside of the sandbox if currently running within it
+    /// Restarts outside of the sandbox if currently running within it and the user asked for it
     pub fn try_restart_to_host() {
         if let Some(flatpak_dir) = get_flatpak_dir() {
             let mut args = vec!["/usr/bin/flatpak-spawn".into(), "--host".into()];
@@ -1077,6 +1080,9 @@ mod flatpak {
                 )
                 .into(),
             );
+            if let Ok(flatpak_id) = env::var("FLATPAK_ID") {
+                args.push(format!("--env={ESCAPED_ENV_NAME}={flatpak_id}").into());
+            }
             args.push(flatpak_dir.join("bin").join("zed").into());
 
             let invocation_args = env::args_os().skip(1).collect::<Vec<_>>();
@@ -1088,8 +1094,8 @@ mod flatpak {
         }
     }
 
-    pub fn set_bin_if_no_escape(mut args: super::Args) -> super::Args {
-        if env::var(NO_ESCAPE_ENV_NAME).is_ok()
+    pub fn set_bin_if_sandboxed(mut args: super::Args) -> super::Args {
+        if !escape_requested()
             && env::var("FLATPAK_ID").is_ok_and(|id| id.starts_with("dev.zed.Zed"))
             && args.zed.is_none()
         {
@@ -1099,8 +1105,14 @@ mod flatpak {
         args
     }
 
+    /// Whether the user opted out of the sandbox, either for this launch or permanently via
+    /// something like `flatpak override --user --env=ZED_FLATPAK_ESCAPE=1 dev.zed.Zed`.
+    fn escape_requested() -> bool {
+        env::var(ESCAPE_ENV_NAME).is_ok_and(|value| !value.is_empty())
+    }
+
     fn get_flatpak_dir() -> Option<PathBuf> {
-        if env::var(NO_ESCAPE_ENV_NAME).is_ok() {
+        if !escape_requested() {
             return None;
         }
 
